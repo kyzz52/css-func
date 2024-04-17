@@ -1,0 +1,297 @@
+<html>
+
+<body>
+    <canvas id="render-canvas"></canvas>
+    <div id="user-interface">
+        <!-- кнопка рестарта -->
+        <img id="restart-btn" src="assets/restart.png" />
+        <!-- значек сбора монет -->
+        <img id="coin-img" src="assets/insert-coin.png" />
+        <!-- счет и его значение -->
+        <p id="coin-score" class="jersey-10-regular">0</p>
+        <!-- <p id="score" class="jersey-10-regular">0</p> -->
+    </div>
+    <style>
+        /* взяли шрифт  */
+        @import url('https://fonts.googleapis.com/css2?family=Jersey+10&display=swap');
+
+        body,
+        #render-canvas,
+        #user-interface {
+            margin: 0;
+            width: 100%;
+            height: 100vh;
+            /* убрать выделение пальцем объектов на сцене: */
+            user-select: none;
+        }
+
+        /* дз - создание функции css .absoPos */
+
+        /* устанавливаем класс - шрифт для нашего приложения */
+        .jersey-10-regular {
+            font-family: "Jersey 10", sans-serif;
+            font-weight: 400;
+            font-style: normal;
+        }
+
+        #restart-btn {
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            width: 100px;
+        }
+
+        #coin-img {
+            position: absolute;
+            top: 2vh;
+            /* vh - проценты от экрана */
+            right: 2vh;
+            width: 5vh;
+        }
+
+        #coin-score {
+            position: absolute;
+            top: -4.6vh;
+            right: 8vh;
+            font-size: 6vh;
+        }
+    </style>
+    <!-- библиотека babylon -->
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <!-- физ движок canon  -->
+    <script src="https://cdn.babylonjs.com/cannon.js"></script>
+    <!-- загрузчик 3d моделей -->
+    <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.js"></script>
+    <script>
+        //СОЗДАНИЕ МИРА
+        let canvas = window.document.querySelector('#render-canvas');
+        //движок
+        let engine = new BABYLON.Engine(canvas, true);
+        //сцена с движком
+        let scene = new BABYLON.Scene(engine);
+        scene.clearColor = new BABYLON.Color3(0.8, 0.8, 0.8); //цвет сцены
+        scene.enablePhysics();
+        scene.createDefaultEnvironment({
+            createSkybox: false,
+            createGround: false,
+            cameraContrast: 2,
+            cameraExposure: 1
+        }); //создаёт окружающую среду по умолчанию
+
+        //камера
+        let camera = new BABYLON.FreeCamera('camera', new BABYLON.Vector3(0, 7, -15), scene);
+        camera.setTarget(BABYLON.Vector3.Zero());
+        //свет
+        let light = new BABYLON.PointLight('light', new BABYLON.Vector3(10, 10, 0), scene);
+        light.intensity = 0.15;
+        //генератор теней
+        var shadowGenerator = new BABYLON.ShadowGenerator(1024, light);
+
+        //платформа
+        const createPlatform = (zPos) => {
+            // Создаем платформу с помощью MeshBuilder.CreateBox, задавая ее размеры и обертку
+            let platform = new BABYLON.MeshBuilder.CreateBox('box', {
+                width: 6,
+                height: 0.1,
+                depth: 6,
+                wrap: true
+            }, scene);
+
+            // Создаем материал для платформы и устанавливаем текстуру
+            let boxMaterial = new BABYLON.StandardMaterial("material", scene);
+            boxMaterial.emissiveTexture = new BABYLON.Texture('assets/platform.png');
+            platform.material = boxMaterial;
+
+            // Позволяет платформе принимать тени
+            platform.receiveShadows = true;
+
+            // Добавляем физический импостер платформе
+            platform.physicsImpostor = new BABYLON.PhysicsImpostor(
+                platform,
+                BABYLON.PhysicsImpostor.BoxImpostor,
+                {
+                    mass: 0 // Устанавливаем массу платформы равной 0 (таким образом, она не будет двигаться под воздействием физики)
+                },
+                scene
+            );
+
+            // Устанавливаем позицию платформы по оси Z
+            platform.position.z = zPos;
+        }
+        for (let i = 0; i < 10; i++) {
+            createPlatform(i * 6); //необходимо умножить на 6, чтоб платформа прокидывалась по оси z на 6 
+        }
+        //монетка
+        let coinArray = [];
+        const createCoin = (pos) => {
+            BABYLON.SceneLoader.ImportMesh(
+                null,
+                'assets/coin/', //путь к объекту
+                'scene.gltf', //сам файл
+                scene,
+                (meshArray) => {
+                    let coin = meshArray[0];
+                    coin.scaling = new BABYLON.Vector3(0.08, 0.08, 0.08);
+                    coin.position = pos; // прокидываем new BABYLON.Vector3(2, 1, 0);
+                    shadowGenerator.addShadowCaster(coin);
+                    coin.receiveShadows = true;
+                    coinArray.push(coin);
+                }
+            );
+        }
+        //создание препятствий
+        let lastRand = 0; //глобальная переменная для отслеживания повторок
+        let boxArray = []; //массив всех созданных препятствий для мяча
+        const createBox = (xPos, zPos) => {
+            let box = BABYLON.MeshBuilder.CreateBox("box", {
+                width: 2,
+                height: 1,
+                depth: 1,
+            },
+                scene);
+            box.position = new BABYLON.Vector3(xPos, 0.6, 3 + zPos);
+            box.material = new BABYLON.StandardMaterial('material', scene);
+            box.material.emissiveColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+            box.physicsImpostor = new BABYLON.PhysicsImpostor(
+                box,
+                BABYLON.PhysicsImpostor.BoxImpostor,
+                {
+                    mass: 0
+                },
+                scene
+            );
+            shadowGenerator.getShadowMap().renderList.push(box);
+            box.receiveShadows = true;
+            boxArray.push(box);
+        }
+        const createBoxRow = (zPos) => {
+            let rand = Math.floor(Math.random() * 3); //генерируем случайное число 0/1/2
+            while (rand === lastRand) { //пока они совпадают генерируем заново
+                rand = Math.floor(Math.random() * 3);
+            }
+            lastRand = rand;
+            for (let i = 0; i < 3; i++) {
+                if (i === rand) {
+                    if (Math.random() < 0.5) { //вероятность появления монеты > 50%
+                        createCoin(new BABYLON.Vector3((i * 2) - 2, 1, 3 + zPos));
+                    } else {
+                        function setAbsolutePosition(element) {
+                            element.style.position = 'absolute';
+                        }
+
+                        // Использование функции
+                        const myElement = document.getElementById('myElement'); // Получаем элемент по ID
+                        setAbsolutePosition(myElement); // Применяем функцию к элементу
+
+                    }
+                    continue;
+                }
+                createBox((i * 2) - 2, zPos)
+            }
+        }
+        for (let i = 0; i < 10; i++) { createBoxRow(i * 6); }
+
+        //мяч
+        let ball = new BABYLON.MeshBuilder.CreateSphere("sphere", { diametr: 1 }, scene);
+        ball.position = new BABYLON.Vector3(0, 2.5, 0);
+        let ballMaterial = new BABYLON.StandardMaterial("material", scene);
+        ballMaterial.emissiveTexture = new BABYLON.Texture('assets/ball.png');
+        ball.material = ballMaterial;
+        shadowGenerator.getShadowMap().renderList.push(ball);
+        //добавляем физику мячику
+        ball.physicsImpostor = new BABYLON.PhysicsImpostor(
+            ball,
+            BABYLON.PhysicsImpostor.SphereImpostor,
+            {
+                //набор физических свойств
+                mass: 1,
+                //restitution: 2, //отскок
+                friction: 5, //трение
+            },
+            scene
+        );
+
+        // Работа с тенями
+        shadowGenerator.useBlurExponentialShadowMap = true;
+        shadowGenerator.useKernelBlur = true;
+        shadowGenerator.blurKernel = 64;
+
+        //ОБРАБОТЧИКИ событий
+        window.addEventListener('resize', function () { //под размер окна
+            engine.resize();
+        });
+
+        window.addEventListener('touchstart', (event) => {
+            let x = event.touches[0].clientX; // Получаем горизонтальную координату первого касания
+
+            if (x > (window.innerWidth / 2)) { // Если касание произошло правее центра экрана
+                ball.physicsImpostor.applyImpulse(
+                    new BABYLON.Vector3(2, 0, 0), // Применяем импульс вправо
+                    ball.getAbsolutePosition() // Точка импульса = текущая позиция мяча
+                );
+            } else { // Если касание произошло левее или в центре экрана
+                ball.physicsImpostor.applyImpulse(
+                    new BABYLON.Vector3(-2, 0, 0), // Применяем импульс влево
+                    ball.getAbsolutePosition() // Точка импульса = текущая позиция мяча
+                );
+            }
+        });
+
+        window.addEventListener('touchend', () => {
+            ball.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(0, 0, 5));
+            ball.physicsImpostor.setAngularVelocity(new BABYLON.Vector3(0, 0, 0));
+        });
+
+        window.addEventListener('beforeinstallprompt', (event) => {
+            event.preventDefault();
+        });
+
+        //Алгоритм
+        let coinScoreInfo = window.document.querySelector('#coin-score');
+        let coinScore = 0;
+        //Функции
+        const saveCoinScore = () => {
+            window.localStorage.setItem('coinScore', coinScore);
+        }
+        //get апи возвращает null = false
+        const loadCoinScore = () => {
+            coinScore = (window.localStorage.getItem('coinScore'))
+                //если значение возвращается
+                ? window.localStorage.setItem('coinScore', coinScore) // то его и прокидываем в coinScore
+                : 0 //а иначе "0"
+                ;
+            coinScoreInfo.innerText = coinScore; // отобразить на странице
+        }
+        loadCoinScore();
+        //Встроенные Функции Babylon.js
+
+        //логика, которая выполнится до рендера сцены
+        scene.registerBeforeRender(() => {
+            for (let i = 0; i < boxArray.length; i++) {
+                if (ball.intersectsMesh(boxArray[i], true)) { //проверяем столкновения
+                    boxArray[i].material.emissiveColor = new BABYLON.Color3(0.5, 0, 0);
+                }
+            }
+            for (let i = 0; i < coinArray.length; i++) {
+                if (ball.intersectsMesh(coinArray[i], false)) {
+                    coinScore++;
+                    coinScoreInfo.innerText = coinScore;
+                    saveCoinScore();
+                    coinArray[i].dispose();
+                    coinArray.splice(i, 1);
+                }
+            }
+        });
+
+
+        //рендер сцены
+        engine.runRenderLoop(() => {
+            camera.position.z = ball.getAbsolutePosition().z - 14;
+            light.position.z = ball.getAbsolutePosition().z;
+            scene.render();
+        });
+    </script>
+
+</body>
+
+</html>
